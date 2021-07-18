@@ -1,0 +1,269 @@
+DROP TABLE IF EXISTS #SCHOLARSHIP1;
+DROP TABLE IF EXISTS #ConfirmedFall;
+DROP TABLE IF EXISTS #FutureConfirmed;
+DROP TABLE IF EXISTS #STUDENT;
+DROP TABLE IF EXISTS #SAvailable;
+DROP TABLE IF EXISTS #Scholarship;
+DROP TABLE IF EXISTS #OrderedItem;
+DROP TABLE IF EXISTS #DataRequired;
+DROP TABLE IF EXISTS #nse;
+
+SELECT * INTO #SCHOLARSHIP1 FROM  (
+SELECT DISTINCT
+       o.Centre_MIS_Code__c AS [Center] 
+       ,o.Enquiry_Token__c AS [Enquiry Token]
+       ,o.[Willing_to_Study_Online__c] AS [Willing to Study Online]
+       ,a.FirstName AS [Student First Name]
+       ,a.LastName AS [Student Last Name]
+       ,a.PersonEmail AS [Student Personal Email]
+       ,Agent.[Name] AS [Agent Name]
+       ,Agent.Agent_URN__c AS [Agent URN]
+       ,u.[Name] AS [Agent Account Owner]
+       ,Manager.[Name] AS [US Account Manager]
+       ,rh.Greater_Region__c AS [Agent Greater Region]
+       ,rh.Region__c AS [Agent Region]
+       ,Agent.[Sub_Region__c] AS [Agent Sub Region]
+       ,ctry.name as [Agent Shipping Address Country]
+       ,p.Term_for_Website__c AS [Term]
+       ,CAST(o.Study_Start_Date__c AS DATE) AS [StudyPlan Start Date]
+	   ,CAST(o.study_end_date__c AS DATE) AS [StudyPlan End Date]
+
+       ,p.Course_Title__c AS [Course Title]
+       ,P.program_group__c AS [Program Group]
+       ,O.ID AS [Application ID]
+       ,c.ID AS [Course ID]
+       ,c.[Name] AS [Course Ref]
+       ,CAST(c.CourseStart_Date__c AS DATE) [Course Start Date]
+	   ,CAST(c.End_Date__c AS DATE) [Course End Date]
+	   ,c.Registration_Status_New__c as [Registration Status]
+
+       ,CASE WHEN Agent.[Name] LIKE 'Direct - %' THEN 'Direct' ELSE 'Agent' END AS [Source]
+       --,CAST(o.Date_Payment_Made__c AS DATE) AS [Date Payment Made]
+       ---,CAST(c.Latest_Response_date__c AS DATE) AS [Latest Response Date]
+       ---,o.Acceptance_Form_Returned__c AS [Acceptance Form Returned]
+       ,CASE WHEN o.source_of_application__c like '%cascade%' THEN 'Yes' ELSE 'No' END AS [Cascaded]
+       ,CASE WHEN o.Sponsor_Name__c IS NOT NULL THEN 'Yes' else 'No' END AS [Sponsor] 
+       ,p.Course_Duration__c AS [Semester Duration]
+       ,o.Study_Plan_Type__c AS [Study Plan]
+       ,ccor.NAME [Country of Residence]
+       ,CAST(o.Date_Deposit_or_Guarantee_Received__c AS DATE) AS [Date Deposit of Guarantee Received]
+       ,caf.Enrolment_Type_Formula__c
+       ,a.Centre_Sharing__c as [Center Sharing]
+	   --,CAST(o.Date_Time_Offer_Letter_Sent__c as date)				  AS [Offer Letter Sent Date]
+       ---,DATEDIFF(day, c.Date_of_Decision_1__c, GETDATE())	  AS [Age of Offer Days since First Decision]
+	   	,MAX(CASE WHEN c.Last_Decision_Code__c in ('C','U') AND c.Last_Response_Code__c IS NULL THEN p.Centre_Code__c ELSE NULL END) OVER(PARTITION BY a.id) AS MaxCentre
+		,MIN(CASE WHEN c.Last_Decision_Code__c in ('C','U') AND c.Last_Response_Code__c IS NULL THEN p.Centre_Code__c ELSE NULL END) OVER(PARTITION BY a.id) AS MinCentre
+
+FROM
+       dbo.Opportunity AS o 
+LEFT JOIN 
+       dbo.Account AS a ON (a.Id = o.AccountId)
+LEFT JOIN 
+       dbo.Courses__c AS c ON (o.Id = c.Study_Plan__c)
+LEFT JOIN 
+       dbo.CAF_Plus__c AS caf ON (c.id=caf.Course_Applied_For__c)
+LEFT JOIN 
+       dbo.Product2 AS p ON (p.Id = c.Course_Name__c)
+LEFT JOIN 
+       dbo.Account AS Agent ON (o.Agent__c = Agent.Id)
+LEFT JOIN 
+       Country__c ccor ON ccor.Id = a.Country_of_Residence__c
+LEFT JOIN 
+       dbo.Regional_Hierarchy__c AS rh ON (Agent.Regional_Hierarchy__c=rh.Id)
+LEFT JOIN 
+       Country__c AS ctry ON (ctry.Id = agent.[Agent_Shipping_Address_Country__c])
+LEFT JOIN 
+       dbo.[User] AS u ON (Agent.OwnerId=u.Id)
+LEFT JOIN 
+       dbo.[User] AS MANAGER ON (Agent.[US_Account_Manager__c]=MANAGER.Id)
+LEFT JOIN 
+       [CUSTOM_TABLES_USA].[dbo].[USA_Reporting_Term_Structure] AS rts ON (rts.Center=o.Centre_MIS_Code__c)
+where
+o.INTO_Centre_Country__c = 'USA'
+	       AND C.[Last_Decision__c] IN ('Offer / Admit', 'Provisional' , 'Pre-Admit', 'Pre-Offer', 'Conditional')
+       AND c.[Last_Response__c] IN ('Confirmed', 'Sponsored', 'Confirmed At Start') 
+	   	AND ([CourseStart_Date__c] BETWEEN rts.MinCourseStart AND rts.MaxCourseStart
+		OR [CourseStart_Date__c] <= rts.MinCourseStart AND c.End_Date__c >= DateAdd(Day, Datediff(Day,-14, rts.MinCourseStart), 0))
+       AND p.Program_Group__c NOT LIKE '%DEGREE%'
+	   		AND (isnull(c.Actual_End_Date_New__c,c.End_Date__c) IS NULL OR isnull(c.Actual_End_Date_New__c,c.End_Date__c) >= rts.MinCourseStart)
+       AND rts.Exclude=0
+       AND rts.FullTerm=1
+	   	AND rts.Term IN ('Fall 2020')
+---		and o.Enquiry_Token__c='IN:E1228853Q'
+)a
+
+select * into #ConfirmedFall from (
+SELECT DISTINCT *
+FROM 
+       #SCHOLARSHIP1
+)b
+
+
+
+SELECT * INTO #nse FROM
+(select ns.[Enquiry Token]  
+from #ConfirmedFall ns
+ LEFT JOIN 
+ [CUSTOM_TABLES_USA].[dbo].[USA_Reporting_Term_Structure] AS rts ON (rts.Center=ns.Center)
+
+where   
+rts.Exclude=0
+ AND rts.FullTerm=1
+ and Enrolment_Type_Formula__c='NSE' 
+ and [Course Start Date]  BETWEEN rts.MinCourseStart AND rts.MaxCourseStart 
+ 	   	AND rts.Term IN ('Fall 2020')
+
+)n
+
+
+select * into #FutureConfirmed from (
+SELECT DISTINCT SCHOLARSHIP1.*
+FROM 
+#SCHOLARSHIP1 SCHOLARSHIP1
+  inner join #ConfirmedFall  ConfirmedFall on SCHOLARSHIP1.[Enquiry Token]=ConfirmedFall.[Enquiry Token]
+WHERE 
+SCHOLARSHIP1. [Course Start Date] >ConfirmedFall.[Course Start Date]
+)ft
+
+
+select * into  #STUDENT from (
+SELECT DISTINCT * 
+FROM 
+       ( SELECT DISTINCT * FROM #ConfirmedFall 
+       UNION  all
+       SELECT DISTINCT * FROM #FutureConfirmed ) AS A
+)st
+
+
+
+select * into  #SAvailable from (
+SELECT
+       SA.ID AS [SAV ID]
+       ,SA.Name AS [SAV Name]
+       ,Budget_Year__c as [SAV Budget Year]
+       ,CASE WHEN SA.[Fund_Type__c] = 'EB+' THEN 'EB Plus' ELSE SA.[Fund_Type__c] END AS [SAV Fund Type]
+FROM 
+       [Scholarship_Available__c] AS SA 
+)sa
+
+select * into  #Scholarship from (
+SELECT 
+       st.[Enquiry Token] AS [Enquiry Token]
+       ,C.Id as [Course ID]
+       ,SCH.Awarded__c AS [Scholarship Amount]
+       ,SCH.Name AS [Scholarship Name]
+       ,SCH.[Type__c] AS [Scholarship Type]
+       ,SCH.[Title__c] AS [Scholarship Title]
+	   ,sch.CreatedDate	as [Scholarship Created Date]
+       ,[Scholarship_Available__c]
+       ,[SAV ID]
+       ,[SAV Name]
+       ,[SAV Budget Year]
+       ,[SAV Fund Type]
+FROM #student st inner join 
+       dbo.Courses__c AS c ON (st.[Application ID] = c.Study_Plan__c)
+       LEFT JOIN 
+       Scholarship_Award__c AS sch ON  (st.[Application ID]=sch.Application__c AND C.Id=sch.Course_Applied_for__c AND sch.Cancel_Award__c='false')
+       LEFT JOIN
+       #SAvailable AS SA ON (SA.[SAV ID]= SCH.[Scholarship_Available__c])
+WHERE ([SAV Budget Year]='2020/21' OR [SAV Budget Year] IS NULL)
+)sc
+
+
+select * into  #OrderedItem from (
+SELECT DISTINCT
+
+       OI.OpportunityId as [Application__c],
+       '' AS [Ordered Item ID],
+       '' AS [Ordered Item Name],
+       OI.UnitPrice AS [Ordered Item Gross Fee],
+       P.NAME AS [Ordered Item Product Name]
+
+FROM
+       OpportunityLineItem AS OI
+       INNER JOIN [Product2] AS P ON (P.ID=OI.Product2Id)
+       INNER JOIN RecordType AS R ON (P.[RecordTypeId]=R.ID)
+       inner join #ConfirmedFall St on st.[Application ID]=OI.OpportunityId
+WHERE 
+R.Id='01230000000aDZcAAM'AND
+ p.family IN ('Tuition Discount', 'Centre Scholarship' )
+
+)ord
+
+
+--select * into #DataRequired from (
+--SELECT DISTINCT
+--       O.ID AS [Application ID]
+--       ,O.Enquiry_Token__c AS [Enquiry Token]
+--       ,DR.[Name] AS [Data Title]
+--       ,DR.[Status__c] AS [DR Status]
+--FROM 
+--       dbo.Opportunity AS o 
+--       LEFT JOIN [dbo].[Data_Required__c] AS DR ON (DR.Application__c=O.ID)
+--       inner join #SCHOLARSHIP SCHOLARSHIP on O.Enquiry_Token__c=SCHOLARSHIP.[Enquiry Token]
+--WHERE 
+--       DR.NAME IN ('Bank statement', 'Affidavit of Support', 'Letter of Financial Guarantee - Admissions', 'Letter of Financial Guarantee - Official'
+--       ,'Application/Signatures', 'Passport', 'I-20 From Transfer School', 'US Visa', 'Under 18 Form')
+--) sc
+
+SELECT DISTINCT 
+       [Center] 
+       ,ConfirmedFall.[Enquiry Token]
+       ,ConfirmedFall.[Willing to Study Online]
+       ,ConfirmedFall.[Student First Name]
+       ,ConfirmedFall.[Student Last Name]
+       ,ConfirmedFall.[Student Personal Email]
+       ,ConfirmedFall.[Agent Name]
+       ,ConfirmedFall.[Agent URN]
+       ,ConfirmedFall.[Agent Account Owner]
+       ,ConfirmedFall.[US Account Manager]
+       ,ConfirmedFall.[Agent Greater Region]
+       ,ConfirmedFall.[Agent Region]
+       ,ConfirmedFall.[Agent Sub Region]
+       ,ConfirmedFall.[Agent Shipping Address Country]
+       ,STUFF((SELECT DISTINCT ',' + R.[Term] FROM #STUDENT  AS R WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Term]
+       ,ConfirmedFall.[StudyPlan Start Date]
+	   ,ConfirmedFall.[StudyPlan End Date]
+	  -- ,[Offer Letter Sent Date]
+	 --  ,[Age of Offer Days since First Decision]
+       ,STUFF((SELECT DISTINCT ',' +R.[Course Title] FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token]  FOR XML PATH ('')),1,1,'') AS [Course Title]
+       ,STUFF((SELECT DISTINCT ',' +R.[Program Group] FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token]  FOR XML PATH ('')),1,1,'') AS [Program Group]
+       ,ConfirmedFall.[Application ID]
+       ,STUFF((SELECT DISTINCT ',' +R.[Course ID]  FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token]  FOR XML PATH ('')),1,1,'') AS [Course ID]
+       ,STUFF((SELECT DISTINCT ',' +R.[Course Ref] FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token]  FOR XML PATH ('')),1,1,'') AS [Course Ref]
+       ,STUFF((SELECT DISTINCT ',' +convert(varchar(10), R.[Course Start Date],101 )FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Course Start Date]
+       
+	   ,STUFF((SELECT DISTINCT ',' +convert(varchar(10), R.[Course End Date],101 )FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Course End Date]
+	   ,STUFF((SELECT DISTINCT ',' + R.[Registration Status] FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Registration Status]
+
+	   ,ConfirmedFall.[Source]
+       --,ConfirmedFall.[Date Payment Made]
+       --,STUFF((SELECT DISTINCT ',' +convert(varchar(10), R.[Latest Response Date],101 ) FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Latest Response Date]
+       --,ConfirmedFall.[Acceptance Form Returned]
+       ,ConfirmedFall.[Cascaded]
+       ,ConfirmedFall.[Sponsor] 
+       ,STUFF((SELECT DISTINCT ',' +R.[Semester Duration] FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Semester Duration]
+       ,ConfirmedFall.[Study Plan]
+       ,ConfirmedFall.[Country of Residence]
+       ,ConfirmedFall.[Date Deposit of Guarantee Received]
+       ,STUFF((SELECT DISTINCT ';' +convert(varchar(10), S.[Scholarship Amount],101) FROM #SCHOLARSHIP AS S WHERE S.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Scholarship Amount]
+       ,STUFF((SELECT DISTINCT ',' +convert(varchar(10), S.[Scholarship Created Date],101)           FROM #SCHOLARSHIP AS S WHERE S.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [Scholarship Created Date]
+	   ,STUFF((SELECT DISTINCT ',' +convert(varchar(10), S.[SAV Name],101)           FROM #SCHOLARSHIP AS S WHERE S.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [SAV Name]
+	   ,STUFF((SELECT DISTINCT ',' +convert(varchar(10), S.[SAV Fund Type],101)      FROM #SCHOLARSHIP AS S WHERE S.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [SAV Fund Type] 
+       ,STUFF((SELECT DISTINCT ',' +convert(varchar(10), S.[SAV Budget Year],101)    FROM #SCHOLARSHIP AS S WHERE S.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS [SAV Budget Year]
+      -- ,STUFF((SELECT DISTINCT ',' + DR.[Data Title] FROM #DataRequired AS DR where ConfirmedFall.[Application ID]=DR.[Application ID] FOR XML PATH ('')),1,1,'') AS [Data Title]
+       --,STUFF((SELECT DISTINCT ',' + DR.[DR Status] FROM #DataRequired AS DR where ConfirmedFall.[Application ID]=DR.[Application ID] FOR XML PATH ('')),1,1,'') AS [DR Status]
+       --,STUFF((SELECT DISTINCT ',' + convert(varchar(10), OI.[Ordered Item Name],101) FROM #OrderedItem AS OI where ConfirmedFall.[Application ID]=OI.[Application__c] FOR XML PATH ('')),1,1,'') AS  [Ordered Item Name]
+       ,STUFF((SELECT DISTINCT ',' + OI.[Ordered Item Product Name]  FROM #OrderedItem AS OI where ConfirmedFall.[Application ID]=OI.[Application__c] FOR XML PATH ('')),1,1,'') AS  [Ordered Item Product Name]
+       ,STUFF((SELECT DISTINCT ';' + convert(varchar(10), OI.[Ordered Item Gross Fee],101) FROM #OrderedItem AS OI where ConfirmedFall.[Application ID]=OI.[Application__c] FOR XML PATH ('')),1,1,'') AS  [Ordered Item Gross Fee]
+	   --	,CASE WHEN ConfirmedFall.MaxCentre != ConfirmedFall.MinCentre THEN 'Yes' ELSE 'No' END AS [Multi Centre Offer]
+,
+
+STUFF((SELECT DISTINCT ',' + case when Enrolment_Type_Formula__c='NSE' then 'Continuer' 
+else Enrolment_Type_Formula__c end  FROM #STUDENT  AS R  WHERE R.[Enquiry Token]=ConfirmedFall.[Enquiry Token] FOR XML PATH ('')),1,1,'') AS 
+[Student Type]
+FROM 
+#ConfirmedFall ConfirmedFall
+
+left join #nse on ConfirmedFall.[Enquiry Token]=#nse.[Enquiry Token]
+where #nse.[Enquiry Token] is null
